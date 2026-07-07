@@ -24,10 +24,10 @@
 이 프로젝트는 CMake를 사용하여 빌드합니다.
 
 # Linux
-mkdir build
-cd build
-cmake ..
-make
+* mkdir build
+* cd build
+* cmake ..
+* make
 
 # Windows
 Visual Studio 2022 사용
