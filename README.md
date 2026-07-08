@@ -23,26 +23,26 @@
 이 프로젝트는 Ubuntu 22.04와 Windows 11에서 테스트되었습니다.
 이 프로젝트는 CMake를 사용하여 빌드합니다.
 
-# Linux
+### Linux
 * mkdir build
 * cd build
 * cmake ..
 * make
 
-# Windows
+### Windows
 Visual Studio 2022 사용
 
 ## 성능 평가
 
 대량의 이미지 변환 시 병렬 처리(Thread Pool) 도입에 따른 성능 향상 측정
 
-# 테스트 환경
+### 테스트 환경
 * CPU : Intel Core i9-13900K (3.00 GHz)
 * Dataset : 640 x 480 해상도의 JPG 이미지 500장
 
-# 처리 소요 시간
+### 처리 소요 시간
 * 순차 처리 : 9777.35 ms
 * 병렬 처리 : 2426.36 ms 
 
-# 결과
+### 결과
 * 병렬 처리 시 순차 처리 대비 약 4.02배 성능 향상
