@@ -25,6 +25,7 @@
 #include <future>
 #include <atomic>
 #include <map>
+#include <type_traits>
 
 #include <chrono>
 #include <sstream>
@@ -68,24 +69,51 @@ public:
                 });
     }
 
+    // template<class F, class... Args>
+    // auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>
+    // {
+    //     using return_type = std::invoke_result_t<F, Args...>;
+
+    //     auto task = std::make_shared<std::packaged_task<return_type()>>(
+    //         std::bind(std::forward<F>(f), std::forward<Args>(args)...)
+    //     );
+
+    //     std::future<return_type> res = task->get_future();
+
+    //     {
+    //         std::unique_lock<std::mutex> lock(queue_mutex);
+    //         if (stop) throw std::runtime_error("enqueue on stopped thread pool");
+
+    //         // 큐에 들어있는 작업 개수가 maxQueueSize보다 작아질 때까지 스레드 대기
+    //         producer_condition.wait(lock, [this] { return this->tasks.size() < this->maxQueueSize; });
+
+    //         tasks.emplace([task]() { (*task)(); });
+    //     }
+
+    //     // 워커 스레드에게 큐에 새 작업이 들어왔다고 알려줌
+    //     condition.notify_one();
+
+    //     return res;
+    // }
+
     template<class F, class... Args>
-    auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>
+    auto enqueue(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
     {
         using return_type = std::invoke_result_t<F, Args...>;
 
         auto task = std::make_shared<std::packaged_task<return_type()>>(
-            std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-        );
+            std::bind(std::forward<F>(f), std::forward<Args>(args)...));
 
         std::future<return_type> res = task->get_future();
 
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
             if (stop) throw std::runtime_error("enqueue on stopped thread pool");
-
+            
             // 큐에 들어있는 작업 개수가 maxQueueSize보다 작아질 때까지 스레드 대기
-            producer_condition.wait(lock, [this] { return this->tasks.size() < this->maxQueueSize; });
-
+            producer_condition.wait(lock, [this] { return this->stop || this->tasks.size() < this->maxQueueSize; });
+            if (stop) throw std::runtime_error("enqueue on stopped thread pool");
+            
             tasks.emplace([task]() { (*task)(); });
         }
 
@@ -97,9 +125,22 @@ public:
 
     ~ThreadPool()
     {
-        { std::unique_lock<std::mutex> lock(queue_mutex); stop = true; }
+        // { std::unique_lock<std::mutex> lock(queue_mutex); stop = true; }
+        // condition.notify_all();
+        // for (std::thread& worker : workers) worker.join();
+
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            stop = true;
+        }
+
         condition.notify_all();
-        for (std::thread& worker : workers) worker.join();
+        producer_condition.notify_all();
+
+        for (std::thread &worker : workers)
+        {
+            if (worker.joinable()) worker.join();
+        }
     }
 
 private:
@@ -110,7 +151,7 @@ private:
     std::condition_variable condition;          // 워커 스레드를 깨우기 위한 조건 변수
 
     std::condition_variable producer_condition; // 스레드를 깨우기 위한 조건 변수
-    size_t maxQueueSize;                      // 큐의 최대 크기
+    size_t maxQueueSize;                        // 큐의 최대 크기
 
     bool stop = false;
 };
@@ -307,12 +348,12 @@ public:
 // 파일 저장
 int WriteFileFromBuf(const std::string& filename, const void* data, size_t size)
 {
-    if (!data || size == 0) return 0;
+    if (!data || size == 0) return -1;
 
     FILE* fp = fopen(filename.c_str(), "wb");
     if (!fp) {
         std::cerr << "file open for writing failed\n";
-        return -1;
+        return -2;
     }
 
     size_t written = fwrite(data, 1, size, fp);
@@ -320,7 +361,7 @@ int WriteFileFromBuf(const std::string& filename, const void* data, size_t size)
     if (written != size) {
         std::cerr << "file write failed\n";
         fclose(fp);
-        return -2;
+        return -3;
     }
 
     fclose(fp);
@@ -396,9 +437,14 @@ std::vector<std::string> ListFileWithExt(const std::string& folderPath, const st
             if (entry.path().extension() == extension)
             {
                 files.push_back(entry.path().generic_string());
-                std::cout << files.back() << std::endl;
             }
         }
+    }
+
+    std::sort(files.begin(), files.end());
+    for (const auto& file : files)
+    {
+        std::cout << file << std::endl;
     }
 
     return files;
@@ -454,6 +500,7 @@ void JpgToPngWorker(int index, const std::string& imgPathFile, ReorderBuf& reord
     if (rt != 0)
     {
         std::cout << "image file load fail=" << imgPathFile << std::endl;
+        reorderBuf.push(index, {});
         return;
     }
 
@@ -461,6 +508,7 @@ void JpgToPngWorker(int index, const std::string& imgPathFile, ReorderBuf& reord
     if (cvImg.empty())
     {
         std::cout << "image decode fail=" << imgPathFile << std::endl;
+        reorderBuf.push(index, {});
         return;
     }
 
@@ -472,6 +520,7 @@ void JpgToPngWorker(int index, const std::string& imgPathFile, ReorderBuf& reord
     if (cv::imencode(".png", cvImg, encodeBuf, pngParam) == false)
     {
         std::cout << "image encode fail=" << imgPathFile << std::endl;
+        reorderBuf.push(index, {});
         return;
     }
 
@@ -487,6 +536,12 @@ void SaveWorker(ReorderBuf& reorderBuf, int totalFile, const std::string& savePa
     for (int i = 0; i < totalFile; i++)
     {
         std::vector<unsigned char> data = reorderBuf.pop_next();
+
+        if (data.empty())
+        {
+            std::cout << "format convert fail" << std::endl;
+            continue;
+        }
 
         snprintf(pathFile, sizeof(pathFile), "%s/%03d.png", savePath.c_str(), i + 1);
         rt = WriteFileFromBuf(pathFile, data.data(), data.size());
