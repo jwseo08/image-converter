@@ -30,7 +30,7 @@
 * make
 
 ### Windows
-Visual Studio 2022 사용
+* Visual Studio 2022 사용
 
 ## 성능 평가
 
