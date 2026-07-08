@@ -69,33 +69,6 @@ public:
                 });
     }
 
-    // template<class F, class... Args>
-    // auto enqueue(F&& f, Args&&... args) -> std::future<typename std::result_of<F(Args...)>::type>
-    // {
-    //     using return_type = std::invoke_result_t<F, Args...>;
-
-    //     auto task = std::make_shared<std::packaged_task<return_type()>>(
-    //         std::bind(std::forward<F>(f), std::forward<Args>(args)...)
-    //     );
-
-    //     std::future<return_type> res = task->get_future();
-
-    //     {
-    //         std::unique_lock<std::mutex> lock(queue_mutex);
-    //         if (stop) throw std::runtime_error("enqueue on stopped thread pool");
-
-    //         // 큐에 들어있는 작업 개수가 maxQueueSize보다 작아질 때까지 스레드 대기
-    //         producer_condition.wait(lock, [this] { return this->tasks.size() < this->maxQueueSize; });
-
-    //         tasks.emplace([task]() { (*task)(); });
-    //     }
-
-    //     // 워커 스레드에게 큐에 새 작업이 들어왔다고 알려줌
-    //     condition.notify_one();
-
-    //     return res;
-    // }
-
     template<class F, class... Args>
     auto enqueue(F &&f, Args &&...args) -> std::future<std::invoke_result_t<F, Args...>>
     {
@@ -125,10 +98,6 @@ public:
 
     ~ThreadPool()
     {
-        // { std::unique_lock<std::mutex> lock(queue_mutex); stop = true; }
-        // condition.notify_all();
-        // for (std::thread& worker : workers) worker.join();
-
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
             stop = true;
